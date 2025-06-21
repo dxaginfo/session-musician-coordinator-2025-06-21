@@ -1,0 +1,145 @@
+version: '3.8'
+
+services:
+  # Backend API service
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: session-musician-coordinator-api
+    container_name: session-musician-api
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - MONGO_URI=mongodb://mongodb:27017/session_musician_db
+      - JWT_SECRET=${JWT_SECRET}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - ELASTICSEARCH_NODE=http://elasticsearch:9200
+      - AWS_ACCESS_KEY=${AWS_ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_S3_BUCKET=${AWS_S3_BUCKET}
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+    volumes:
+      - ./backend:/usr/src/app
+      - /usr/src/app/node_modules
+    depends_on:
+      - mongodb
+      - redis
+      - elasticsearch
+    networks:
+      - app-network
+
+  # Frontend React application
+  client:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: session-musician-coordinator-client
+    container_name: session-musician-client
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    volumes:
+      - ./frontend:/usr/src/app
+      - /usr/src/app/node_modules
+    depends_on:
+      - api
+    networks:
+      - app-network
+
+  # MongoDB service
+  mongodb:
+    image: mongo:5.0
+    container_name: session-musician-mongodb
+    restart: unless-stopped
+    environment:
+      - MONGO_INITDB_DATABASE=session_musician_db
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb-data:/data/db
+    networks:
+      - app-network
+
+  # Redis for caching and session management
+  redis:
+    image: redis:6.2-alpine
+    container_name: session-musician-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - app-network
+
+  # Elasticsearch for search functionality
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.14.0
+    container_name: session-musician-elasticsearch
+    environment:
+      - node.name=es01
+      - cluster.name=es-docker-cluster
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - app-network
+
+  # Kibana for Elasticsearch monitoring (optional)
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.14.0
+    container_name: session-musician-kibana
+    environment:
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    networks:
+      - app-network
+
+  # Nginx as reverse proxy and for serving static files
+  nginx:
+    image: nginx:alpine
+    container_name: session-musician-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
+      - ./frontend/build:/usr/share/nginx/html
+    depends_on:
+      - api
+      - client
+    networks:
+      - app-network
+
+# Docker volumes for persistent data
+volumes:
+  mongodb-data:
+  redis-data:
+  elasticsearch-data:
+
+# Docker network for container communication
+networks:
+  app-network:
+    driver: bridge
